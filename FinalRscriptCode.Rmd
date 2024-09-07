@@ -1,0 +1,1329 @@
+---
+title: "Fly"
+output: html_document
+date: "2024-02-28"
+---
+```{r }
+#loading the necessary libraries to analyze the data 
+library(Seurat)
+library(scCustomize)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r, echo = FALSE}
+
+AllSamples.combined<- readRDS("/Users/georgemichael/Desktop/Omics.nosync/Courses/Final Master Project/AllSamplesCombined.rds")
+
+```
+
+```{r, echo = FALSE}
+# View the structure of the loaded object
+head(AllSamples.combined)
+```
+
+```{r}
+# Plot for nFeature_RNA
+VlnPlot(AllSamples.combined, 
+        features = "nFeature_RNA",
+        group.by = "orig.ident",
+        raster = FALSE)
+```
+
+    By visualizing the distribution of nFeature_RNA across different samples and groups, we can quickly identify any patterns, differences, or outliers in the data. It helps in understanding the variability of this variable and its relationship with the groups defined by sample
+
+```{r}
+# Plot for nCount_RNA
+VlnPlot(AllSamples.combined, 
+        features = "nCount_RNA",
+        group.by = "orig.ident",
+        raster = FALSE)
+```
+
+    By visualizing the distribution of nCount_RNA across different samples and groups, we can gain insights into the overall abundance or complexity of RNA in each sample group. Similar to the nFeature_RNA plot, we can compare the distributions between different groups to identify patterns, differences, or similarities in RNA counts.
+    
+```{r}
+# Plot for percent.mt with adjusted Y-axis limit
+VlnPlot(AllSamples.combined, 
+        features = "percent.mt",
+        group.by = "orig.ident",
+        raster = FALSE) +
+  coord_cartesian(ylim = c(0, 10))
+
+
+```
+
+    In summary, most of the samples have their percent.mt values within the same scale (up to 5.0), indicating consistency or similarity in mitochondrial content across those samples. However, samples 2 and 6 appear to deviate from this trend. This consistency could have technical or biological implications and is an important aspect to consider in data analysis and interpretation
+
+
+```{r}
+# FeatureScatter is typically used to visualize feature-feature relationships, but can be used
+# for anything calculated by the object, i.e. columns in object metadata, PC scores etc.
+plot1 <- FeatureScatter(AllSamples.combined, feature1 = "nCount_RNA", feature2 = "percent.mt",raster = FALSE,group.by = "orig.ident")
+plot2 <- FeatureScatter(AllSamples.combined, feature1 = "nCount_RNA", feature2 = "nFeature_RNA",raster = FALSE,group.by = "orig.ident")
+plot1 + plot2
+```
+      
+    The scatter plot between nCount_RNA (x-axis) and percent.mt (y-axis) reveals a clear trend where the percentage of mitochondrial reads tends to increase as the total count of RNA decreases. Most of the data points are clustered near 0 on the x-axis, indicating a higher total count of RNA, while the y-axis extends up to 5, suggesting variability in the percentage of mitochondrial reads across samples
+    In the scatter plot between nCount_RNA (x-axis) and nFeature_RNA (y-axis), the majority of data points are clustered near 0 on the x-axis, indicating lower total counts of RNA. However, the y-axis extends up to around 7500, suggesting variability in the total number of detected features across samples. Additionally, there is a slight curve in the distribution of data points at the top end of the y-axis, indicating potential saturation in the detection of features at higher total counts of RNA.
+    
+```{r}
+VlnPlot(AllSamples.combined, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, raster = FALSE,group.by = "orig.ident")
+
+```
+
+    
+```{r, echo = FALSE}
+AllSamples.combined <- subset(AllSamples.combined, subset = nFeature_RNA > 200 & nFeature_RNA < 3500 & nCount_RNA <7500 & percent.mt < 5)
+```
+
+```{r}
+VlnPlot(AllSamples.combined, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, raster = FALSE,group.by = "orig.ident")
+
+```
+    The provided code subsets the AllSamples.combined Seurat object to retain cells meeting specific criteria. It selects cells with a number of detected features (nFeature_RNA) greater than 200 and less than 2500, indicating a moderate level of transcriptomic complexity. Additionally, it includes cells with a percentage of mitochondrial reads (percent.mt) less than 5, indicating minimal mitochondrial contamination. This filtering process ensures that the subset contains high-quality cells with an optimal balance of RNA content and minimal mitochondrial interference for downstream analysis.
+    
+```{r, echo = FALSE}
+# View the structure of the loaded object
+head(AllSamples.combined)
+```
+
+#Normalizing the data
+```{r}
+AllSamples.combined <- NormalizeData(AllSamples.combined)
+```
+    
+    Normalization helps to minimize technical artifacts and biases in the data, providing a more accurate representation of the underlying biological signals present in the scRNA-seq dataset.
+    
+
+# Identification of highly variable features (feature selection)
+
+```{r}
+AllSamples.combined <- FindVariableFeatures(AllSamples.combined, selection.method = "vst", nfeatures = 2000)
+
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(AllSamples.combined), 10)
+
+# plot variable features with labels
+plot2 <- LabelPoints(plot = VariableFeaturePlot(AllSamples.combined), points = top10, repel = TRUE)
+
+plot2
+
+```
+
+
+    This process aids in identifying genes with significant expression variation, which is vital for further exploration and interpretation in single-cell RNA sequencing (scRNA-seq) data analysis.
+    The top 10 genes listed represent those with the highest variability in expression levels across all samples in the dataset. These genes include various types, such as copia{}RR48347, kl-3, asRNA:CR44370, whe, CG9029, CG34212, copia{}387, lcs, CG34109, and lncRNA:CR34335. Each gene may have distinct biological functions or play different roles within cellular processes. Their high variability suggests potential importance in regulating cellular activities or responding to environmental stimuli across different conditions or cell types. Further analysis of these genes could shed light on their specific roles and implications in the underlying biology of the dataset.
+
+# Scaling the data
+```{r, echo = FALSE}
+all.genes <- rownames(AllSamples.combined)
+AllSamples.combined <- ScaleData(AllSamples.combined)
+```
+
+    By scaling the data, each gene's expression values are adjusted to have a mean of zero and a standard deviation of one across cells. This normalization helps to remove biases caused by differences in sequencing depth and library size between cells. Additionally, scaling reduces the impact of technical artifacts and improves the interpretability of downstream analyses by highlighting biologically relevant variations in gene expression. Overall, scaling the data enhances the robustness and accuracy of subsequent analyses performed on the scRNA-seq dataset.
+
+#Perform linear dimensional reduction
+
+```{r}
+AllSamples.combined <- RunPCA(AllSamples.combined, features = VariableFeatures(object = AllSamples.combined))
+
+# Examine and visualize PCA results a few different ways
+print(AllSamples.combined[["pca"]], dims = 1:5, nfeatures = 5)
+```
+
+    Visualizing PCA results provides insights into the underlying structure of the data and helps identify patterns or clusters of cells. Each principal component captures different patterns of gene expression variation across the dataset. Positively correlated genes contribute positively to the corresponding principal component, while negatively correlated genes contribute negatively. 
+    
+```{r}
+VizDimLoadings(AllSamples.combined, dims = 1:2, reduction = "pca")
+
+DimPlot(AllSamples.combined, reduction = "pca", raster=FALSE) + NoLegend()
+```
+
+    The separation of clusters along both PC1 and PC2 axes indicates that these groups have distinct patterns of gene expression variation relative to each other.
+    
+```{r}
+DimHeatmap(AllSamples.combined, dims = 1:2, cells = 500, balanced = TRUE)
+```
+
+    The division of the heatmap into distinct color regions along PC1 suggests that there are significant differences in gene expression patterns between these two regions. Cells or samples in the upper left and upper right regions of the heatmap likely represent distinct subpopulations with different gene expression profiles, potentially reflecting different cell types, states, or experimental conditions captured by PC1. Further analysis, such as identifying the genes driving these differences or comparing them to known marker genes, can help elucidate the biological significance of these patterns.
+    
+#Determine the ‘dimensionality’ of the dataset
+```{R}
+ElbowPlot(AllSamples.combined)
+```
+
+    The Elbow plot shows a decrease in the standard deviation or variance explained per principal component as the number of principal components increases, and if there is a noticeable "elbow" where this decrease becomes less steep, typically around PC 15 in your case, then PC 15 might be considered the optimal number of principal components to retain.
+
+    This means that the first 15 principal components explain a significant portion of the variance in the dataset, and beyond PC 15, the additional principal components contribute less to explaining the overall variance. Retaining only the first 15 principal components could simplify the analysis while still capturing most of the variability in the data.
+```{R}
+# Determine percent of variation associated with each PC
+pct <- AllSamples.combined[["pca"]]@stdev / sum(AllSamples.combined[["pca"]]@stdev) * 100
+
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+
+co1
+# Determine the difference between variation of PC and subsequent PC
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+
+# last point where change of % of variation is more than 0.1%.
+co2
+pcs <- min(co1, co2)
+
+pcs
+
+plot_df <- data.frame(pct = pct, 
+           cumu = cumu, 
+           rank = 1:length(pct))
+
+# Elbow plot to visualize 
+  ggplot(plot_df, aes(cumu, pct, label = rank, color = rank > pcs)) + 
+  geom_text() + 
+  geom_vline(xintercept = 90, color = "grey") + 
+  geom_hline(yintercept = min(pct[pct > 5]), color = "grey") +
+  theme_bw()
+```
+
+
+
+#Cluster the cells
+```{r}
+AllSamples.combined <- FindNeighbors(AllSamples.combined, dims = 1:16)#20
+AllSamples.combined <- FindClusters(AllSamples.combined, resolution = 0.5)
+```
+  
+    Overall, the Louvain algorithm partitioned the dataset into 27 clusters based on the local structure of the data captured by the first 15 principal components.
+    
+# Look at cluster IDs of the first 5 cells
+```{r, echo = FALSE}
+head(Idents(AllSamples.combined), 5)
+```
+
+#Run non-linear dimensional reduction (UMAP/tSNE)
+```{r}
+AllSamples.combined <- RunUMAP(AllSamples.combined, dims = 1:16)
+```
+
+# note that you can set `label = TRUE` or use the LabelClusters function to help label
+# individual clusters
+```{r}
+DimPlot(AllSamples.combined, reduction = "umap", label=TRUE,raster=FALSE)
+```
+
+
+```{r}
+DimPlot(AllSamples.combined, reduction = "umap", label = TRUE, pt.size = 0.5, label.size = 5, split.by = "orig.ident", ncol = 3,raster=FALSE)
+```
+
+```{r}
+#saveRDS(AllSamples.combined, file = "/Users/georgemichael/Desktop/Omics.nosync/Courses/Final Master Project/AllSamplesCombinedAfterUMAP.rds")
+#AllSamples.combined<- readRDS("/Users/georgemichael/Desktop/Omics.nosync/Courses/Final Master Project/AllSamplesCombinedAfterUMAP.rds")
+
+```
+
+
+
+```{r}
+# Load necessary libraries
+library(Seurat)
+library(dplyr)
+library(tidyr)
+
+# Assume AllSamples.combined is your Seurat object
+
+# Extract the metadata
+metadata <- AllSamples.combined@meta.data
+
+# Create a table of clusters per sample
+cluster_table <- metadata %>%
+  group_by(orig.ident, seurat_clusters) %>%  # Group by sample and cluster
+  summarise(Count = n(), .groups = "drop") %>%  # Count the number of cells in each cluster for each sample and drop groups
+  mutate(Present = ifelse(Count > 0, "Yes", "No")) %>%  # Mark presence of clusters
+  select(-Count) %>%  # Remove the count column to focus on presence
+  pivot_wider(names_from = seurat_clusters, values_from = Present, values_fill = "No")  # Reshape the data to wide format
+
+# Print the table
+print(cluster_table)
+
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+
+# Convert 'Yes' to 1 and 'No' to 0
+binary_table <- cluster_table %>%
+  mutate(across(-orig.ident, ~ ifelse(. == "Yes", 1, 0)))
+
+# Convert the table to a matrix, with sample names as row names
+binary_matrix <- as.matrix(binary_table[,-1])
+rownames(binary_matrix) <- binary_table$orig.ident
+
+# Function to calculate Jaccard Similarity between two binary vectors
+jaccard_similarity <- function(x, y) {
+  intersection <- sum(x * y)
+  union <- sum(x + y) - intersection
+  return(intersection / union)
+}
+
+# Initialize matrix to store Jaccard Similarities
+n_samples <- nrow(binary_matrix)
+similarity_matrix <- matrix(0, nrow = n_samples, ncol = n_samples)
+rownames(similarity_matrix) <- colnames(similarity_matrix) <- rownames(binary_matrix)
+
+# Calculate pairwise Jaccard Similarities
+for (i in 1:n_samples) {
+  for (j in 1:n_samples) {
+    if (i != j) {
+      similarity_matrix[i, j] <- jaccard_similarity(binary_matrix[i, ], binary_matrix[j, ])
+    } else {
+      similarity_matrix[i, j] <- 1  # Self-similarity is always 1
+    }
+  }
+}
+
+# Convert similarity matrix to data frame for better display
+similarity_df <- as.data.frame(similarity_matrix)
+
+# Print the similarity matrix
+print(similarity_df)
+
+# Optional: Use kable for a more formatted display if needed
+if(!require(knitr)) install.packages("knitr")
+library(knitr)
+kable(similarity_df, caption = "Jaccard Similarity Matrix Between Samples")
+
+```
+
+
+
+
+
+```{r}
+# Assuming clusters are already identified
+cluster_overlap <- table(AllSamples.combined$orig.ident, Idents(AllSamples.combined))
+
+# Create a matrix of Jaccard Index or another similarity metric
+similarity_matrix <- matrix(NA, nrow = ncol(cluster_overlap), ncol = ncol(cluster_overlap))
+rownames(similarity_matrix) <- colnames(similarity_matrix) <- colnames(cluster_overlap)
+
+for(i in 1:ncol(cluster_overlap)) {
+  for(j in 1:ncol(cluster_overlap)) {
+    similarity_matrix[i, j] <- sum(pmin(cluster_overlap[,i], cluster_overlap[,j])) / sum(pmax(cluster_overlap[,i], cluster_overlap[,j]))
+  }
+}
+
+similarity_matrix <- as.data.frame(similarity_matrix)
+similarity_matrix
+
+```
+
+
+
+```{r}
+# Assuming `percentage_matrix` is your matrix with percentages
+
+# Create a function to find the most similar cluster for each cluster
+find_most_similar <- function(similarity_matrix) {
+  # Initialize a vector to store the most similar cluster for each cluster
+  most_similar <- vector("list", nrow(similarity_matrix))
+  
+  # Iterate over each cluster
+  for (i in 1:nrow(similarity_matrix)) {
+    # Exclude self-similarity by setting diagonal to NA
+    similarity_matrix[i, i] <- NA
+    
+    # Find the index of the maximum similarity value
+    max_idx <- which.max(similarity_matrix[i, ])
+    
+    # Store the result
+    most_similar[[i]] <- list(
+      cluster = rownames(similarity_matrix)[i],
+      most_similar_cluster = colnames(similarity_matrix)[max_idx],
+      similarity_percentage = similarity_matrix[i, max_idx]
+    )
+  }
+  
+  # Convert the list to a data frame for easier viewing
+  most_similar_df <- do.call(rbind, lapply(most_similar, as.data.frame))
+  return(most_similar_df)
+}
+
+# Find the most similar clusters
+most_similar_clusters <- find_most_similar(percentage_matrix)
+
+# Load the knitr package for displaying the table (install it if you haven't already)
+if(!require(knitr)) install.packages("knitr")
+library(knitr)
+
+# Display the most similar clusters table
+kable(most_similar_clusters, caption = "Most Similar Clusters")
+```
+
+#diferential expression genes
+
+```{r}
+# find markers for every cluster compared to all remaining cells, report only the positive ones
+
+fly.markers <- FindAllMarkers(AllSamples.combined, only.pos = TRUE) # JUST TO AVOID LOADING IT EVERY SINGLE FILE
+fly.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1)
+
+saveRDS(fly.markers, file = "/Users/georgemichael/Desktop/Omics.nosync/Courses/Final Master Project/fly_markers_dataUMAPlast.rds")
+
+#fly.markers <- readRDS("/Users/georgemichael/Desktop/Final Master Project/FLY-seq/fly_markers_dataUMAPlast.rds")
+
+
+```
+
+```{r}
+
+fly.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1) %>%
+    slice_head(n = 10) %>%
+    ungroup() -> top10
+DoHeatmap(AllSamples.combined, features = top10$gene) + NoLegend()
+
+```
+#clustering identification according to www.flyrnai.org
+
+
+```{r}
+#adult salivary gland 
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "sage","sens","yellow-d","5-HT7","5-HT2A","CG33109","LysP","Sox21b"), colors_use = c("grey","blue"), flip_axes = TRUE)
+```
+
+
+```{r}
+#male germline cell
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c("asRNA:CR44370","lncRNA:CR43264","kl-3","CG33340","CG12699","ocn","CG9920","CG31740","lncRNA:CR9284","CG9016"), colors_use = c("grey","blue"), flip_axes = TRUE)
+```
+
+```{r}
+#male germline cell
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c("asRNA:CR44370","lncRNA:CR43264","kl-3","CG33340","CG12699","ocn","CG9920","CG31740","S-Lap1","CG9016"), colors_use = c("grey","blue"), flip_axes = TRUE)
+```
+
+
+```{r}
+#female germline cell
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "dhd","yl","gnu","CycB","wisp","AGO3","pgc","CycA","RpS5b","me31B"), colors_use = c("grey","blue"), flip_axes = TRUE)
+```
+
+```{r}
+#hemocyte
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "Ppn","Hml","Ten-m","zfh1","Col4a1","lectin-28C","SPARC","LpR2","udd","vkg"), colors_use = c("grey","blue"), flip_axes = TRUE)
+```
+
+```{r}
+#adult Malpighian tubule principal cell of lower ureter
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "Shab","Chs2","pyr","Mur29B","CG2556","Wnt4","NKCC","CG6337","Ndae1","fz"), colors_use = c("grey","blue"), flip_axes = TRUE)
+```
+
+```{r}
+#hemocyte
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "CecC","CecB","CG14629","Hml","lectin-28C","nAChRbeta3","CecA1","Karl","PGRP-SA","CG6910"), colors_use = c("grey","blue"), flip_axes = TRUE)
+```
+
+```{r}
+#adult Malpighian tubule principal cell of lower segment
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "SPR","CG33181","Glut1","Picot","CG15279","Ndae1","CG32017","CG17834","CG33993","Mco1"), colors_use = c("grey","blue"), flip_axes = TRUE)
+```
+
+```{r}
+#adult Malpighian tubule bar-shaped cell of initial segment
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "Nha2","dac","CG30116","NetB","ed","Pde1c","tutl","how","CG4607","CG13323"), colors_use = c("grey","blue"), flip_axes = TRUE)
+```
+
+
+```{r}
+#adult Malpighian tubule principal cell
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "CG42235","chinmo","CG4928","List","CG7882","Slc45-1","Snmp2","CG2187","Ptx1","CG31663","Irk1","CapaR","Dh31-R","Eglp2"), colors_use = c("grey","blue"), flip_axes = TRUE)
+
+```
+
+#are both found in clusters 16 and 21, with cluster 16 being predominantly in males and cluster 21 in females, it suggests that these cell types may exhibit sex-specific differences in gene expression or distribution.
+
+```{r}
+#adult Malpighian tubule principal cell of initial segment
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "Scp2","hth","PMCA","bi","Camta","Ptp10D","Debcl","CG8620","Dh31-R","numb"), colors_use = c("grey","blue"), flip_axes = TRUE)
+
+```
+#are both found in clusters 16 and 21, with cluster 16 being predominantly in males and cluster 21 in females, it suggests that these cell types may exhibit sex-specific differences in gene expression or distribution.
+
+```{r}
+#adult Malpighian tubule stellate cell of main segment
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "Octalpha2R","RhoGEF64C","tsh","CG17839","Lkr","SecCl","Lim3","Pvf1","axo","Lgr1"), colors_use = c("grey","blue"), flip_axes = TRUE)
+
+```
+#The two stellate cell clusters (main segment SCs and bar-shaped SCs) both express teashirt (tsh), kinin receptor (lkr) and Secretory chloride channel (SecCl) (Denholm et al., 2013; Radford et al., 2002; Feingold et al., 2019)
+
+#are both found in clusters 13 and 18, with cluster 18 being predominantly in males and cluster 13 in females, it suggests that these cell types may exhibit sex-specific differences in gene expression or distribution.
+
+
+
+```{r}
+#body fat
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "apolpp","Yp1","FASN1","Yp3","bru1","Yp2","CG6503","CG2233","LpR2","Ubx"), colors_use = c("grey","blue"), flip_axes = TRUE)
+
+```
+
+```{r}
+#malpighian tubule stem cell
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "rau","fru","zfh2","Rbfox1","CG42747","N","CG34370","sba","Dl","hdc"), colors_use = c("grey","blue"), flip_axes = TRUE)
+
+```
+
+```{r}
+#body fat
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "CycB","wisp","dhd","me31B","CycA","pgc","smg","BigH1","His2Av","Df31"), colors_use = c("grey","blue"), flip_axes = TRUE)
+
+```
+
+#go with unique values https://www.flyrnai.org/tools/rna_seq_base/web/dot_plot/38/plot_coord=1/sample_id=all
+
+#cluster 1
+
+```{r}
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "CG7252"), colors_use = c("grey","blue"), flip_axes = TRUE)
+```
+
+#cluster 1==lower ureter PC
+
+#cluster 3
+```{r}
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "GATE{}721","zen","CG31267"), colors_use = c("grey","blue"), flip_axes = TRUE)
+```
+
+#cluster3==lower ureter PC or adult garland nephrocytes
+
+#cluster 4
+```{r}
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "Alg7","CG3386","CG2961","CR43671","lncRNA:CR45618","CG12520","PPO3","asRNA:CR43916","Ada1-2","escl"), colors_use = c("grey","blue"), flip_axes = TRUE)
+```
+
+#cluster4==main segment?
+
+#cluster5== loweer segment
+#6 adult garland nephrocytes
+#9 adult garland nephrocytes or lower segment?
+#12 adult garland nephrocytes
+#13 main segment pc 
+#14 upper ureter pc
+#15 main segment pc
+#18 initial and transitional pc
+#20adult garland nephrocytes
+#21 main segment 
+#26 main segment stellate cell or adult garland nep
+
+
+```{r}
+# Compute the average log2 fold change for each cluster
+avg_log2FC_per_cluster <- fly.markers %>%
+  group_by(cluster) %>%
+  summarize(avg_log2FC = mean(avg_log2FC))
+
+# List to store top 10 markers for each cluster
+top_10_markers_per_cluster <- list()
+
+# Loop through each cluster
+for (cluster_id in unique(fly.markers$cluster)) {
+  # Filter the markers for the current cluster
+  cluster_markers <- fly.markers %>%
+    filter(cluster == cluster_id)
+  
+  # Sort the markers based on their average log2 fold change
+  sorted_markers <- cluster_markers %>%
+    arrange(desc(avg_log2FC))
+  
+  # Select the top 10 markers
+  top_10_markers <- head(sorted_markers, 10)
+  
+  # Store the top 10 markers for the current cluster
+  top_10_markers_per_cluster[[paste("Cluster", cluster_id)]] <- top_10_markers
+}
+
+# Print the top 10 markers for each cluster
+for (i in seq_along(top_10_markers_per_cluster)) {
+  cat("Top 10 markers for Cluster", names(top_10_markers_per_cluster)[i], ":\n")
+  print(top_10_markers_per_cluster[[i]])
+  cat("\n")
+}
+
+
+```
+
+```{r}
+
+# Define the list of markers
+markers <- c("TwdlM", "nur", "Cpr65Ea", "TwdlD", "Cp18", "Cp16", "Cp15", "CG12708", "CG2962", "gammaTub37C")
+
+# Plot violin plots for each marker
+VlnPlot(object = AllSamples.combined, features = markers)
+```
+
+
+```{r}
+# Function to compute Jaccard similarity between two sets
+jaccard_similarity <- function(set1, set2) {
+  intersection <- length(intersect(set1, set2))
+  union <- length(union(set1, set2))
+  similarity <- intersection / union
+  return(similarity)
+}
+
+# List to store cluster similarities
+cluster_similarities <- matrix(0, nrow = length(unique(fly.markers$cluster)), 
+                                ncol = length(unique(fly.markers$cluster)),
+                                dimnames = list(unique(fly.markers$cluster), 
+                                                unique(fly.markers$cluster)))
+
+# Compute Jaccard similarity between clusters based on all markers
+for (i in unique(fly.markers$cluster)) {
+  for (j in unique(fly.markers$cluster)) {
+    if (i != j) {
+      markers_i <- fly.markers$gene[fly.markers$cluster == i]
+      markers_j <- fly.markers$gene[fly.markers$cluster == j]
+      similarity <- jaccard_similarity(markers_i, markers_j)
+      cluster_similarities[i, j] <- similarity
+    }
+  }
+}
+
+# Print cluster similarities
+print(cluster_similarities)
+
+```
+
+
+```{r}
+# Define the threshold for similarity
+threshold <- 0.5
+
+# List to store similar cluster pairs
+similar_clusters <- list()
+
+# Loop through the cluster similarities matrix
+for (i in rownames(cluster_similarities)) {
+  for (j in colnames(cluster_similarities)) {
+    # Check if the similarity value is above the threshold and the pair is not already in the list
+    if (cluster_similarities[i, j] >= threshold && !identical(i, j)) {
+      # Store the cluster pair and its similarity value
+      pair_name <- paste("Cluster", i, "vs", j)
+      similar_clusters[[pair_name]] <- cluster_similarities[i, j]
+    }
+  }
+}
+
+# Print similar cluster pairs
+for (pair_name in names(similar_clusters)) {
+  cat(pair_name, ": ", similar_clusters[[pair_name]], "\n")
+}
+
+# Export similar cluster pairs to a file
+write.table(similar_clusters, file = "similar_clusters.csv", sep = ",", col.names = TRUE, quote = FALSE)
+```
+
+```{r}
+DotPlot_scCustom(seurat_object = AllSamples.combined, features = c( "TwdlM"), colors_use = c("grey","blue"), flip_axes = TRUE)
+```
+```{R}
+markers <- c("TwdlM")
+# Plot violin plots for each marker
+ VlnPlot(object = AllSamples.combined, features = markers,raster=FALSE)
+```
+
+```{r}
+library(ggplot2)
+
+# Define the list of markers
+markers <- c("TwdlM", "nur", "Cpr65Ea", "TwdlD", "Cp18", "Cp16", "Cp15", "CG12708", "CG2962", "gammaTub37C")
+
+# Create a function to plot violin plots with custom shape
+CustomVlnPlot <- function(seurat_obj, features) {
+  p <- VlnPlot(object = seurat_obj, features = features)
+  p <- p + theme_bw()  # Adjust the theme if needed
+  p <- p + geom_violin(trim = FALSE)  # Add the violin shape
+  return(p)
+}
+
+# Plot violin plots with custom shape
+CustomVlnPlot(seurat_obj = AllSamples.combined, features = markers)
+```
+
+
+```{R}
+# Assuming you already have loaded and processed your data in the AllSamples.combined object
+
+# Calculate the size of each cluster
+cluster_sizes <- as.data.frame(table(Idents(AllSamples.combined)))
+
+# Rename the columns for clarity
+colnames(cluster_sizes) <- c("Cluster", "Size")
+
+# Sort the clusters by size in descending order
+cluster_sizes <- cluster_sizes[order(cluster_sizes$Size, decreasing = TRUE),]
+
+# Print the clusters sorted by size
+print(cluster_sizes)
+```
+
+#Top 10 Most Expressed Genes in Clusters
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "TwdlM", "nur", "Cpr65Ea", "TwdlD", "Cp18",
+    "Cp16","Cp15", "CG12708", "CG2962", "gammaTub37C"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 0")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "CG13946", "lncRNA:CR46119", "Su(Ste):CR42418", "lncRNA:CR44988", "lncRNA:CR46148",
+    "GstD11","CG12506", "1360{}6435", "1360{}6442", "dpr16"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 1")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "HB{}1552", "INE-1{}5039", "asRNA:CR45046", "CG14823", "lncRNA:CR45884",
+    "3S18{}RR48327", "INE-1{}5123", "gypsy4{}2768", "CG34166", "TotB"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 6")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "lncRNA:CR43053", "lncRNA:CR32690", "CG5062", "CG6244", "CG33667",
+    "lncRNA:CR45506", "lncRNA:CR42767", "asRNA:CR43152", "betaNACtes5", "CG6220"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 7")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "lncRNA:TS1", "lncRNA:CR45702", "lncRNA:CR44909", "Or59a", "CG44270",
+    "lncRNA:CR44980", "lncRNA:CR43234", "INE-1{}4790", "lncRNA:CR45347", "CG43795"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 8")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "micropia{}1243", "Nplp3", "CG4000", "CG7203", "CG2070",
+    "CG7409", "Ir47b", "H15", "Sp1", "Cpr49Ab"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 9")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "CG44422", "lncRNA:CR44997", "sls", "frac", "SmydA-4",
+    "tn", "CG45002", "CG12672", "RunxA", "CG12105"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 10")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "Antp", "CG32645", "CG17190", "CG40486", "CG11852",
+    "CG15353", "Cyp318a1", "Cyp4g15", "AdoR", "CG13067"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 11")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "lncRNA:CR45231", "CG32447", "Elo68alpha", "DIP-zeta", "inv",
+    "Lim1", "tnc", "OdsH", "Elo68beta", "unc-13-4A"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 12")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "Antp", "CG14572", "lncRNA:CR44933", "CG11852", "CG14566",
+    "Cyp318a1", "Cyp313a4", "CG32645", "CG17190", "AdoR"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 26")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "lncRNA:CR45231", "CG32447", "Elo68alpha", "DIP-zeta", "inv",
+    "Lim1", "tnc", "CG32645", "Elo68beta", "unc-13-4A"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 12")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "CG44098", "ect", "CG8170", "CG42269", "NKCC",
+    "CG13215", "Lgr1", "bnb", "RYa-R", "comm3"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 13")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "CG13739", "NetA", "AstC-R1", "Hs3st-A", "bin",
+    "Cbp53E", "CG44422", "bru3", "CG12672", "Scgdelta"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 14")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "lncRNA:CR45752", "Rt1b{}1062", "lncRNA:CR45753", "lncRNA:CR45569", "hbs",
+    "AstC-R2", "Spn77Bb", "lncRNA:CR45256", "Spn77Bc", "CG43060"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 15")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "S{}135", "Gr98a", "inaF-A", "INE-1{}5793", "Dh31-R",
+    "TkR86C", "lncRNA:CR45279", "asRNA:CR44018", "CG13148", "INE-1{}3205"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 16")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "CG17105", "lncRNA:CR45456", "lncRNA:CR45737", "lncRNA:CR44363", "lncRNA:CR43840",
+    "lncRNA:CR46336", "Hug", "obst-G", "CG6431", "CheB93b"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 17")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "RYa-R", "lncRNA:CR45037", "ect", "lncRNA:CR44538", "297{}6497",
+    "CG44098", "CG8170", "dls", "S{}1150", "hopper{}1181"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 18")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "Rdl", "para", "Syt1", "CG15765", "nAChRalpha5",
+    "Cngl", "CG9395", "SiaT", "fne", "eag"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 19")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "CG31797", "CG13330", "lncRNA:CR44456", "CG43796", "CG15059",
+    "CG18368", "CG4073", "whip", "asRNA:CR46047", "p-cup"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 20")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "asRNA:CR44018", "CG43102", "Dh31-R", "ct", "CG13148",
+    "Gr98a", "lncRNA:CR45279", "lncRNA:CR43909", "lncRNA:CR44640", "Oatp58Db"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 21")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "CG34303", "INE-1{}2470", "CG13749", "asRNA:CR43683", "INE-1{}3411",
+    "Nep4", "CG14990", "Actbeta", "CG42876", "Sid"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 22")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "CG34109", "hopper2{}4186", "INE-1{}4141", "CG6472", "GlyT",
+    "CG34462", "OtopLa", "nrv3", "Stalker2{}6584", "CG2016"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 23")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "snRNA:U5:23D", "asRNA:CR44035", "CG43291", "CG31664", "asRNA:CR45124",
+    "Odc2", "CR32745", "salm", "3S18{}RR48327", "Hayan"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 24")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "mir-289", "1360{}5886", "CG3916", "invader3{}695", "Su(Ste):CR42414",
+    "kl-3", "side-VI", "micropia{}5049", "transib2{}185", "CR46279"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 25")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "lncRNA:CR45753", "INE-1{}3323", "lncRNA:CR44177", "asRNA:CR45342", "INE-1{}3432",
+    "CG18302", "INE-1{}2128", "CG44270", "Rt1b{}1062", "lncRNA:CR44419"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 27")
+
+```
+
+```{r}
+
+DotPlot_scCustom(
+  seurat_object = AllSamples.combined,
+  features = c(
+    "CG34196", "CG34211", "CG34212", "CG43680", "whe",
+    "asRNA:CR44130", "CG45080", "CG42832", "CG44142", "lcs"
+  ),
+  colors_use = c("grey", "blue"),
+  flip_axes = TRUE
+) +
+ggtitle("Top 10 Most Expressed Genes in Cluster 28")
+
+```
+
+
+#differential Gene Expression in samples
+
+
+```{r}
+subset_S1 <- GetAssayData(AllSamples.combined, assay = "RNA")[, AllSamples.combined@meta.data$orig.ident == "s1"]
+subset_S2 <- GetAssayData(AllSamples.combined, assay = "RNA")[, AllSamples.combined@meta.data$orig.ident == "s2"]
+subset_S3 <- GetAssayData(AllSamples.combined, assay = "RNA")[, AllSamples.combined@meta.data$orig.ident == "s3"]
+subset_S4 <- GetAssayData(AllSamples.combined, assay = "RNA")[, AllSamples.combined@meta.data$orig.ident == "s4"]
+subset_S5 <- GetAssayData(AllSamples.combined, assay = "RNA")[, AllSamples.combined@meta.data$orig.ident == "s5"]
+subset_S6 <- GetAssayData(AllSamples.combined, assay = "RNA")[, AllSamples.combined@meta.data$orig.ident == "s6"]
+subset_S7 <- GetAssayData(AllSamples.combined, assay = "RNA")[, AllSamples.combined@meta.data$orig.ident == "s7"]
+subset_S8 <- GetAssayData(AllSamples.combined, assay = "RNA")[, AllSamples.combined@meta.data$orig.ident == "s8"]
+```
+
+```{R}
+# Check the number of cells in each sample group
+table(AllSamples.combined@meta.data$orig.ident)
+```
+
+
+```{r}
+#the sample information is encoded within the barcode labels. If "1_1" indicates sample 1 and "1_2" indicates sample 2, and so on-extract the relevant samples accordingly.
+
+sample1 <- grep("1_1", names(Idents(AllSamples.combined)), value = TRUE)
+sample2 <- grep("1_2", names(Idents(AllSamples.combined)), value = TRUE)
+sample3 <- grep("1_3", names(Idents(AllSamples.combined)), value = TRUE)
+sample4 <- grep("1_4", names(Idents(AllSamples.combined)), value = TRUE)
+sample5 <- grep("1_5", names(Idents(AllSamples.combined)), value = TRUE)
+sample6 <- grep("1_6", names(Idents(AllSamples.combined)), value = TRUE)
+sample7 <- grep("1_7", names(Idents(AllSamples.combined)), value = TRUE)
+sample8 <- grep("1_8", names(Idents(AllSamples.combined)), value = TRUE)
+
+```
+
+
+```{r}
+differential_markers1_5 <- FindMarkers(AllSamples.combined, ident.1 = sample1, ident.2 = sample5)
+
+head(differential_markers1_5)
+```
+
+
+
+```{r}
+sample1_markers <- differential_markers1_5[differential_markers1_5$p_val < 0.05 & differential_markers1_5$avg_log2FC > 0, ]
+sample5_markers <- differential_markers1_5[differential_markers1_5$p_val < 0.05 & differential_markers1_5$avg_log2FC < 0, ]
+
+# Print the head of sample1_markers and sample5_markers to examine them
+head(sample1_markers)
+head(sample5_markers)
+```
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(ggrepel)  # For text labels
+
+# Select the top 20 most significant genes based on adjusted p-values
+top_genes <- differential_markers1_5 %>%
+  arrange(p_val_adj) %>%
+  head(20)
+
+# Create a volcano plot using adjusted p-values
+volcano_plot <- ggplot(differential_markers1_5, aes(x = avg_log2FC, y = -log10(p_val_adj), 
+                                                    color = ifelse(avg_log2FC > 0, "Non-Diabetic Female Nephrocytes + Heart", "Diabetic Female Nephrocytes + Heart"))) +
+  geom_point(alpha = 0.6) +  # Color points by sample
+  scale_color_manual(values = c("Non-Diabetic Female Nephrocytes + Heart" = "blue", "Diabetic Female Nephrocytes + Heart" = "green"), 
+                     name = "Sample") + # Set colors and legend name
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue") +  # Add significance threshold
+  labs(x = "Log2 Fold Change", y = "-log10(adjusted p-value)", title = "Volcano Plot") +
+  theme_minimal() +
+  geom_text_repel(
+    data = top_genes,  # Use only the top 20 genes for labeling
+    aes(label = rownames(top_genes)),
+    size = 3
+  )
+
+# Print the volcano plot
+print(volcano_plot)
+
+
+
+```
+
+
+```{r}
+differential_markers2_6 <- FindMarkers(AllSamples.combined, ident.1 = sample2, ident.2 = sample6)
+
+head(differential_markers2_6)
+```
+
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(ggrepel)  # For text labels
+library(dplyr)    # For data manipulation
+
+# Handle zero or very small p_val_adj values
+# Set a threshold to avoid log10(0) issue
+differential_markers2_6 <- differential_markers2_6 %>%
+  mutate(p_val_adj = ifelse(p_val_adj == 0, min(p_val_adj[p_val_adj > 0], na.rm = TRUE) / 2, p_val_adj))  # Avoid log10(0) issue
+
+# Select the top 20 most significant genes based on adjusted p-values
+top_genes <- differential_markers2_6 %>%
+  arrange(p_val_adj) %>%
+  head(20)
+
+# Create a volcano plot using adjusted p-values
+volcano_plot <- ggplot(differential_markers2_6, aes(x = avg_log2FC, y = -log10(p_val_adj), 
+                                                    color = ifelse(avg_log2FC > 0, "Non-Diabetic Female Malpighian Tubule", "Diabetic Female Malpighian Tubule"))) +
+  geom_point(alpha = 0.6) +  # Color points by sample
+  scale_color_manual(values = c("Non-Diabetic Female Malpighian Tubule" = "blue", "Diabetic Female Malpighian Tubule" = "green"), 
+                     name = "Sample") + # Set colors and legend name
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue") +  # Add significance threshold
+  labs(x = "Log2 Fold Change", y = "-log10(adjusted p-value)", title = "Volcano Plot") +
+  theme_minimal() +
+  geom_text_repel(
+    data = top_genes,  # Use only the top 20 genes for labeling
+    aes(label = rownames(top_genes)),
+    size = 3
+  )
+
+# Print the volcano plot
+print(volcano_plot)
+
+
+```
+
+
+```{r}
+differential_markers3_7 <- FindMarkers(AllSamples.combined, ident.1 = sample3, ident.2 = sample7)
+
+head(differential_markers3_7)
+```
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(ggrepel)  # For text labels
+
+# Select the top 20 most significant genes based on adjusted p-values
+top_genes <- differential_markers3_7 %>%
+  arrange(p_val_adj) %>%
+  head(20)
+
+# Create a volcano plot using adjusted p-values
+volcano_plot <- ggplot(differential_markers3_7, aes(x = avg_log2FC, y = -log10(p_val_adj), 
+                                                    color = ifelse(avg_log2FC > 0, "Non-Diabetic Male Nephrocytes + Heart", "Diabetic Male Nephrocytes + Heart"))) +
+  geom_point(alpha = 0.6) +  # Color points by sample
+  scale_color_manual(values = c("Non-Diabetic Male Nephrocytes + Heart" = "blue", "Diabetic Male Nephrocytes + Heart" = "green"), 
+                     name = "Sample") + # Set colors and legend name
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue") +  # Add significance threshold
+  labs(x = "Log2 Fold Change", y = "-log10(adjusted p-value)", title = "Volcano Plot") +
+  theme_minimal() +
+  geom_text_repel(
+    data = top_genes,  # Use only the top 20 genes for labeling
+    aes(label = rownames(top_genes)),
+    size = 3
+  )
+
+# Print the volcano plot
+print(volcano_plot)
+
+```
+
+```{r}
+differential_markers4_8 <- FindMarkers(AllSamples.combined, ident.1 = sample4, ident.2 = sample8)
+
+head(differential_markers4_8)
+```
+
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(ggrepel)  # For text labels
+library(dplyr)    # For data manipulation
+
+# Handle zero or very small p_val_adj values
+# Set a threshold to avoid log10(0) issue
+differential_markers4_8 <- differential_markers4_8 %>%
+  mutate(p_val_adj = ifelse(p_val_adj == 0, min(p_val_adj[p_val_adj > 0], na.rm = TRUE) / 2, p_val_adj))  # Avoid log10(0) issue
+
+# Select the top 20 most significant genes based on adjusted p-values
+top_genes <- differential_markers4_8 %>%
+  arrange(p_val_adj) %>%
+  head(20)
+
+# Create a volcano plot using adjusted p-values
+volcano_plot <- ggplot(differential_markers4_8, aes(x = avg_log2FC, y = -log10(p_val_adj), 
+                                                    color = ifelse(avg_log2FC > 0, "Non-Diabetic Male Malpighian Tubule", "Diabetic Male Malpighian Tubule"))) +
+  geom_point(alpha = 0.6) +  # Color points by sample
+  scale_color_manual(values = c("Non-Diabetic Male Malpighian Tubule" = "blue", "Diabetic Male Malpighian Tubule" = "green"), 
+                     name = "Sample") + # Set colors and legend name
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue") +  # Add significance threshold
+  labs(x = "Log2 Fold Change", y = "-log10(adjusted p-value)", title = "Volcano Plot") +
+  theme_minimal() +
+  geom_text_repel(
+    data = top_genes,  # Use only the top 20 genes for labeling
+    aes(label = rownames(top_genes)),
+    size = 3
+  )
+
+# Print the volcano plot
+print(volcano_plot)
+```
+
+```{r}
+
+pheatmap(differential_markers4_8, 
+         scale = "row",   # Scale rows (genes) to have mean 0 and standard deviation 1
+         cluster_rows = TRUE,  # Cluster rows (genes)
+         cluster_cols = TRUE,  # Cluster columns (samples)
+         color = colorRampPalette(c("blue", "white", "red"))(100),  # Define color palette
+         main = "Heatmap of Differentially Expressed Genes",
+         fontsize = 6,  # Adjust font size
+         cellwidth = 10,  # Adjust cell width
+         cellheight = 6)  # Adjust cell height
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
